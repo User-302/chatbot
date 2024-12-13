@@ -1,103 +1,109 @@
 'use client'
 
 import { Box, Button, Stack, TextField } from '@mui/material'
+import { getFirestore, collection, query, where, getDocs } from 'firebase/firestore';
 import { useState, useEffect, useRef } from 'react'
+import { useAuth } from '@clerk/nextjs';
+import { db } from '../firebase'; // Import your Firebase config
 
 export default function Home() {
+  const { userId } = useAuth();
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
       content: "Hi! I'm your therapist. How can I help you today?",
     },
   ])
-  const [message, setMessage] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
+  const [message, setMessage] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(false); // Add state for minimized status
+  const messageInputRef = useRef(null);
+  const messagesEndRef = useRef(null);
 
-    // Create a ref for the text field
-    const messageInputRef = useRef(null);
+  // ________________________FETCH CHAT HISTORY ON LOAD________________________
+  useEffect(() => {
+    const fetchChatHistory = async () => {
+      if (!userId) {
+        console.warn("User is not authenticated. Chat history won't be fetched.");
+        return;
+      }
   
-// ________________________SEND MESSAGE FUNCTION________________________
-
+      try {
+        const response = await fetch('/api/chat/', { method: 'GET' });
+        const result = await response.json();
+        
   
-const sendMessage = async () => {
-  if (!message.trim() || isLoading) return;
-  setIsLoading(true);
+        if (result.messages && result.messages.length > 0) {
+          setMessages(result.messages);
+        } else setMessages([
+          {
+            role: 'assistant',
+            content: "Hi! I'm your therapist. How can I help you today?",
+          },
+        ]);
+        
+      } catch (error) {
+        console.error("Error fetching chat history:", error);
+      }
+    };
+  
+    fetchChatHistory();
+  }, [userId]);
+  
+  const sendMessage = async () => {
+    if (!message.trim() || isLoading) return;
 
-  setMessage('');
-  setMessages((messages) => [
-    ...messages,
-    { role: 'user', content: message },
-    { role: 'assistant', content: '' },
-  ]);
+    setIsLoading(true);
+    const newMessages = [...messages, { role: "user", content: message }];
+    setMessages(newMessages);
 
-  try {
-    const response = await fetch('/api/chat/', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        messages: [...messages, { role: 'user', content: message }],
-      }),
-    });
+    try {
+      const response = await fetch('/api/chat/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message }),
+      });
 
-    if (!response.ok) {
-      throw new Error('Network response was not ok');
+      const result = await response.json();
+      setMessages([...newMessages, { role: "assistant", content: result.content }]);
+    } catch (error) {
+      console.error("Error sending message:", error);
     }
 
-    const result = await response.json(); // Get JSON response
+    setMessage('');
+    setIsLoading(false);
+  };
 
-    // Ensure 'content' exists in the response
-    const content = result.content || 'No response content';
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+  
+  
+  // Auto scroll function
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
 
-    // Update the last message with the content received
-    setMessages((messages) => {
-      let lastMessage = messages[messages.length - 1];
-      let otherMessages = messages.slice(0, messages.length - 1);
-      return [
-        ...otherMessages,
-        { ...lastMessage, content: content }, // Update content
-      ];
-    });
-  } catch (error) {
-    console.error('Error:', error);
-    setMessages((messages) => [
-      ...messages,
-      { role: 'assistant', content: "I'm sorry, but I encountered an error. Please try again later." },
-    ]);
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  const toggleChatbox = () => {
+    setIsMinimized(!isMinimized); // Toggle minimized state
+  };
+
+
+const handleKeyPress = (event) => {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault()
+    sendMessage(event)
   }
-  setIsLoading(false);
-
-      // Focus the text field after sending the message
-      if (messageInputRef.current) {
-        messageInputRef.current.focus();
-      }
-};
-
-  
-    const handleKeyPress = (event) => {
-      if (event.key === 'Enter' && !event.shiftKey) {
-        event.preventDefault()
-        sendMessage()
-      }
-    }
-  
-
-// AUTO SCROLLING TO ENSURE VISIBILITY OF MOST RECENT MESSAGES
-const messagesEndRef = useRef(null)
-
-const scrollToBottom = () => {
-  messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
 }
-
-useEffect(() => {
-  scrollToBottom()
-}, [messages])
 
   return (
     <Box
       width="100vw"
-      height="100vh"
+      height="85vh"
       display="flex"
       flexDirection="column"
       justifyContent="center"
@@ -105,8 +111,8 @@ useEffect(() => {
     >
       <Stack
         direction={'column'}
-        width="500px"
-        height="700px"
+        width="700px"
+        height="500px"
         border="1px solid black"
         p={2}
         spacing={3}
@@ -149,8 +155,9 @@ useEffect(() => {
             fullWidth
             value={message}
             onChange={(e) => setMessage(e.target.value)}
-            onKeyPress={handleKeyPress}
+            onKeyDown={handleKeyPress}
             disabled={isLoading}
+            inputRef={messageInputRef} // Add ref to text field
           />
           <Button 
             variant="contained" 
